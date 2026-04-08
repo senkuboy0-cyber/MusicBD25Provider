@@ -10,7 +10,6 @@ class MusicBD25Provider : MainAPI() {
     override var name = "MusicBD25"
     override var lang = "bn"
     override val hasMainPage = true
-    override val hasSearch = true
 
     override val supportedTypes = setOf(
         TvType.Others
