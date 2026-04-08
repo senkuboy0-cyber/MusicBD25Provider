@@ -9,7 +9,6 @@ class MusicBD25Provider : MainAPI() {
     override var name = "MusicBD25"
     override var lang = "bn"
     override val hasMainPage = true
-    override val hasSearch = true
     override val supportedTypes = setOf(TvType.Others)
 
     private val ua = mapOf(
@@ -30,7 +29,7 @@ class MusicBD25Provider : MainAPI() {
                 .trim().ifBlank { return@mapNotNull null }
             newMovieSearchResponse(title, href, TvType.Others) { posterUrl = null }
         }.distinctBy { it.url }
-        return newHomePageResponse(request.name, items, hasNextPage = true)
+        return newHomePageResponse(request.name, items, hasNext = true)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
