@@ -46,11 +46,12 @@ class MusicBD25Provider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = ua).document
-        val title = url.substringAfterLast("/").replace(".html", "").replace("-", " ").trim()
-        val poster = doc.selectFirst(".thumb img")?.attr("src")?.trim()
+        val title = url.substringAfterLast("/")
+            .replace(".html", "").replace("-", " ").trim()
+        val poster = doc.selectFirst("div.thumb img, .thumb > img, [class=thumb] img")
+            ?.attr("src")?.trim()
             ?.let { if (it.startsWith("http")) it else null }
-            ?: doc.selectFirst("img[src*='blogger.googleusercontent']")?.attr("src")
-            ?: doc.selectFirst("meta[property=og:image]")?.attr("content")
+            ?: doc.selectFirst("img[src*='googleusercontent']")?.attr("src")
         return newMovieLoadResponse(title, url, TvType.Others, url) {
             this.posterUrl = poster
         }
@@ -73,8 +74,7 @@ class MusicBD25Provider : MainAPI() {
             else -> return false
         }
         val finalUrl = try {
-            val resp = app.get(downloadUrl, headers = ua + mapOf("Referer" to mainUrl), allowRedirects = false)
-            resp.headers["location"]?.trim()?.ifBlank { null } ?: downloadUrl
+            app.get(downloadUrl, headers = ua + mapOf("Referer" to mainUrl), allowRedirects = true).url
         } catch (e: Exception) { downloadUrl }
         if (!finalUrl.startsWith("http")) return false
         val quality = when {
