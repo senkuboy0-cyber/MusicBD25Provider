@@ -25,13 +25,10 @@ class MusicBD25Provider : MainAPI() {
             val rawHref = el.attr("href").trim().ifBlank { return@mapNotNull null }
             val href = if (rawHref.startsWith("http")) rawHref else "$mainUrl$rawHref"
             val title = el.text().trim().ifBlank { return@mapNotNull null }
-            // thumbnail: কাছের .thumb img
             val poster = el.selectFirst("div.thumb img, .thumb img, img")?.let {
                 it.attr("src").ifBlank { it.attr("data-src") }
             }?.let { if (it.startsWith("http")) it else null }
-            newMovieSearchResponse(title, href, TvType.Others) {
-                posterUrl = poster
-            }
+            newMovieSearchResponse(title, href, TvType.Others) { posterUrl = poster }
         }.distinctBy { it.url }
         return newHomePageResponse(request.name, items, hasNext = true)
     }
@@ -49,30 +46,23 @@ class MusicBD25Provider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = ua).document
-
         val title = doc.selectFirst("h1, h2")?.text()?.trim()
             ?: url.substringAfterLast("/").replace(".html","").replace("-"," ").trim()
-
-        // Thumbnail সঠিকভাবে বের করো
         val poster = doc.selectFirst("div.thumb img, .thumb img")
             ?.attr("src")?.trim()
             ?.let { if (it.startsWith("http")) it else null }
             ?: doc.selectFirst("img[src*='blogger.googleusercontent']")?.attr("src")
             ?: doc.selectFirst("meta[property=og:image]")?.attr("content")
-
-        // filedownload URL বের করো
         val rawHref = doc.select("a[href*='filedownload'], source[src*='filedownload']")
             .firstOrNull()?.let {
                 it.attr("href").ifBlank { it.attr("src") }
             }?.trim() ?: ""
-
         val videoUrl = when {
             rawHref.startsWith("http") -> rawHref
             rawHref.startsWith("//")   -> "https:$rawHref"
             rawHref.startsWith("/")    -> "$mainUrl$rawHref"
             else -> ""
         }
-
         return newMovieLoadResponse(title, url, TvType.Others, videoUrl) {
             this.posterUrl = poster
         }
@@ -85,29 +75,23 @@ class MusicBD25Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (data.isBlank() || !data.startsWith("http")) return false
-
-        // Redirect follow করে final URL বের করো
-        val finalUrl = try {
-            val resp = app.get(
-                data,
-                headers = ua + mapOf("Referer" to mainUrl),
-                allowRedirects = false
-            )
-            val location = resp.headers["location"]?.trim()?.ifBlank { null }
-            if (location != null && location.startsWith("http")) location else data
-        } catch (e: Exception) { data }
-
-        if (!finalUrl.startsWith("http")) return false
-
-        val quality = when {
-            finalUrl.contains("1080") -> Qualities.P1080.value
-            finalUrl.contains("720")  -> Qualities.P720.value
-            finalUrl.contains("480")  -> Qualities.P480.value
-            else                      -> Qualities.Unknown.value
+        var finalUrl = data
+        repeat(3) {
+            try {
+                val resp = app.get(
+                    finalUrl,
+                    headers = ua + mapOf("Referer" to mainUrl),
+                    allowRedirects = false
+                )
+                val location = resp.headers["location"]?.trim()
+                if (!location.isNullOrBlank() && location.startsWith("http")) {
+                    finalUrl = location
+                }
+            } catch (e: Exception) { }
         }
-
+        if (!finalUrl.startsWith("http")) return false
         callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
-            this.quality = quality
+            this.quality = Qualities.Unknown.value
             this.headers = ua + mapOf("Referer" to mainUrl)
         })
         return true
