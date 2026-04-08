@@ -2,6 +2,8 @@ package com.musicbd25
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MusicBD25Provider : MainAPI() {
 
@@ -57,6 +59,25 @@ class MusicBD25Provider : MainAPI() {
         }
     }
 
+    // Java HttpURLConnection দিয়ে redirect location বের করো
+    private fun getRedirectLocation(targetUrl: String, referer: String): String {
+        return try {
+            val conn = URL(targetUrl).openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            conn.setRequestProperty("Referer", referer)
+            conn.connectTimeout = 10000
+            conn.readTimeout = 10000
+            conn.connect()
+            val location = conn.getHeaderField("Location") ?: targetUrl
+            conn.disconnect()
+            location.trim()
+        } catch (e: Exception) {
+            targetUrl
+        }
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -67,7 +88,7 @@ class MusicBD25Provider : MainAPI() {
 
         val doc = app.get(data, headers = ua).document
 
-        // filedownload link বের করো — href="//domain/filedownload/..."
+        // page এ filedownload link খোঁজো
         val rawHref = doc.select("a[href*='filedownload']")
             .firstOrNull()?.attr("href")?.trim() ?: return false
 
@@ -78,27 +99,10 @@ class MusicBD25Provider : MainAPI() {
             else -> return false
         }
 
-        // Step 1 redirect → CDN URL (location header)
-        val step2Url = try {
-            val r1 = app.get(
-                step1Url,
-                headers = ua + mapOf("Referer" to mainUrl),
-                allowRedirects = false
-            )
-            r1.headers["location"]?.trim()?.ifBlank { null } ?: step1Url
-        } catch (e: Exception) { step1Url }
+        // HttpURLConnection দিয়ে final mp4 URL বের করো
+        val finalUrl = getRedirectLocation(step1Url, mainUrl)
 
-        // Step 2 redirect → final mp4 URL (location header)
-        val finalUrl = try {
-            val r2 = app.get(
-                step2Url,
-                headers = ua + mapOf("Referer" to mainUrl),
-                allowRedirects = false
-            )
-            r2.headers["location"]?.trim()?.ifBlank { null } ?: step2Url
-        } catch (e: Exception) { step2Url }
-
-        if (!finalUrl.startsWith("http")) return false
+        if (!finalUrl.startsWith("http") || finalUrl == step1Url) return false
 
         val quality = when {
             finalUrl.contains("1080") -> Qualities.P1080.value
@@ -109,7 +113,7 @@ class MusicBD25Provider : MainAPI() {
 
         callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
             this.quality = quality
-            this.headers = ua + mapOf("Referer" to step2Url)
+            this.headers = ua + mapOf("Referer" to step1Url)
         })
         return true
     }
