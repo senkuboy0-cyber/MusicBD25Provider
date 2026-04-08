@@ -2,8 +2,8 @@ package com.musicbd25
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import java.net.HttpURLConnection
-import java.net.URL
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 class MusicBD25Provider : MainAPI() {
 
@@ -13,22 +13,19 @@ class MusicBD25Provider : MainAPI() {
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Others)
 
-    private val ua = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
+    private val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    private val uaMap = mapOf("User-Agent" to ua)
 
     override val mainPage = mainPageOf(
         "$mainUrl/site-0.html?to-page=" to "সকল ভিডিও (Latest)",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = request.data + page
-        val doc = app.get(url, headers = ua).document
+        val doc = app.get(request.data + page, headers = uaMap).document
         val items = doc.select("a[href*='/page-download/']").mapNotNull { el ->
             val rawHref = el.attr("href").trim().ifBlank { return@mapNotNull null }
             val href = if (rawHref.startsWith("http")) rawHref else "$mainUrl$rawHref"
-            val title = (el.selectFirst("span")?.text() ?: el.text())
-                .trim().ifBlank { return@mapNotNull null }
+            val title = (el.selectFirst("span")?.text() ?: el.text()).trim().ifBlank { return@mapNotNull null }
             newMovieSearchResponse(title, href, TvType.Others) { posterUrl = null }
         }.distinctBy { it.url }
         return newHomePageResponse(request.name, items, hasNext = true)
@@ -36,46 +33,43 @@ class MusicBD25Provider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-        val doc = app.get("$mainUrl/site-1.html?to-search=$encoded", headers = ua).document
+        val doc = app.get("$mainUrl/site-1.html?to-search=$encoded", headers = uaMap).document
         return doc.select("a[href*='/page-download/']").mapNotNull { el ->
             val rawHref = el.attr("href").trim().ifBlank { return@mapNotNull null }
             val href = if (rawHref.startsWith("http")) rawHref else "$mainUrl$rawHref"
-            val title = (el.selectFirst("span")?.text() ?: el.text())
-                .trim().ifBlank { return@mapNotNull null }
+            val title = (el.selectFirst("span")?.text() ?: el.text()).trim().ifBlank { return@mapNotNull null }
             newMovieSearchResponse(title, href, TvType.Others) { posterUrl = null }
         }.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val doc = app.get(url, headers = ua).document
-        val title = url.substringAfterLast("/")
-            .replace(".html", "").replace("-", " ").trim()
+        val doc = app.get(url, headers = uaMap).document
+        val title = url.substringAfterLast("/").replace(".html", "").replace("-", " ").trim()
         val poster = doc.selectFirst("div.thumb img, .thumb > img, [class=thumb] img")
-            ?.attr("src")?.trim()
-            ?.let { if (it.startsWith("http")) it else null }
+            ?.attr("src")?.trim()?.let { if (it.startsWith("http")) it else null }
             ?: doc.selectFirst("img[src*='googleusercontent']")?.attr("src")
         return newMovieLoadResponse(title, url, TvType.Others, url) {
             this.posterUrl = poster
         }
     }
 
-    // Java HttpURLConnection দিয়ে redirect location বের করো
-    private fun getRedirectLocation(targetUrl: String, referer: String): String {
+    // OkHttp দিয়ে HEAD request → Location header বের করো
+    private fun fetchLocation(targetUrl: String, referer: String): String {
         return try {
-            val conn = URL(targetUrl).openConnection() as HttpURLConnection
-            conn.instanceFollowRedirects = false
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            conn.setRequestProperty("Referer", referer)
-            conn.connectTimeout = 10000
-            conn.readTimeout = 10000
-            conn.connect()
-            val location = conn.getHeaderField("Location") ?: targetUrl
-            conn.disconnect()
-            location.trim()
-        } catch (e: Exception) {
-            targetUrl
-        }
+            val client = OkHttpClient.Builder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .build()
+            val req = Request.Builder()
+                .url(targetUrl)
+                .head()
+                .addHeader("User-Agent", ua)
+                .addHeader("Referer", referer)
+                .build()
+            client.newCall(req).execute().use { resp ->
+                resp.header("Location")?.trim() ?: targetUrl
+            }
+        } catch (e: Exception) { targetUrl }
     }
 
     override suspend fun loadLinks(
@@ -86,9 +80,9 @@ class MusicBD25Provider : MainAPI() {
     ): Boolean {
         if (data.isBlank() || !data.startsWith("http")) return false
 
-        val doc = app.get(data, headers = ua).document
+        val doc = app.get(data, headers = uaMap).document
 
-        // page এ filedownload link খোঁজো
+        // href="//domain/filedownload/..." বের করো
         val rawHref = doc.select("a[href*='filedownload']")
             .firstOrNull()?.attr("href")?.trim() ?: return false
 
@@ -99,8 +93,8 @@ class MusicBD25Provider : MainAPI() {
             else -> return false
         }
 
-        // HttpURLConnection দিয়ে final mp4 URL বের করো
-        val finalUrl = getRedirectLocation(step1Url, mainUrl)
+        // OkHttp HEAD → final mp4 URL
+        val finalUrl = fetchLocation(step1Url, mainUrl)
 
         if (!finalUrl.startsWith("http") || finalUrl == step1Url) return false
 
@@ -113,7 +107,7 @@ class MusicBD25Provider : MainAPI() {
 
         callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
             this.quality = quality
-            this.headers = ua + mapOf("Referer" to step1Url)
+            this.headers = uaMap + mapOf("Referer" to step1Url)
         })
         return true
     }
