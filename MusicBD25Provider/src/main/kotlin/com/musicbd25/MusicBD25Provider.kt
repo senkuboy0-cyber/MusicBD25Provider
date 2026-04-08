@@ -53,7 +53,22 @@ class MusicBD25Provider : MainAPI() {
             ?.let { if (it.startsWith("http")) it else null }
             ?: doc.selectFirst("img[src*='blogger.googleusercontent']")?.attr("src")
             ?: doc.selectFirst("meta[property=og:image]")?.attr("content")
-        return newMovieLoadResponse(title, url, TvType.Others, url) {
+
+        // filedownload URL বের করো — এটাই direct MP4
+        val rawSrc = doc.selectFirst("source[src*='filedownload']")
+            ?.attr("src")?.trim()
+            ?: doc.selectFirst("a[href*='filedownload']")
+            ?.attr("href")?.trim()
+            ?: ""
+
+        val videoUrl = when {
+            rawSrc.startsWith("http") -> rawSrc
+            rawSrc.startsWith("//")   -> "https:$rawSrc"
+            rawSrc.startsWith("/")    -> "$mainUrl$rawSrc"
+            else -> ""
+        }
+
+        return newMovieLoadResponse(title, url, TvType.Others, videoUrl) {
             this.posterUrl = poster
         }
     }
@@ -65,32 +80,13 @@ class MusicBD25Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (data.isBlank() || !data.startsWith("http")) return false
-        val doc = app.get(data, headers = ua).document
-
-        val rawHref = doc.select("a[href*='filedownload'], source[src*='filedownload']")
-            .firstOrNull()?.let {
-                it.attr("href").ifBlank { it.attr("src") }
-            }?.trim() ?: return false
-
-        val downloadUrl = when {
-            rawHref.startsWith("http") -> rawHref
-            rawHref.startsWith("//")   -> "https:$rawHref"
-            rawHref.startsWith("/")    -> "$mainUrl$rawHref"
-            else -> return false
-        }
-
-        // Final URL বের করো — যেকোনো domain হোক
-        val finalUrl = app.get(
-            downloadUrl,
-            headers = ua + mapOf("Referer" to mainUrl),
-            allowRedirects = true
-        ).url
-
-        if (!finalUrl.startsWith("http")) return false
-
-        callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
+        callback(newExtractorLink(name, name, data, ExtractorLinkType.VIDEO) {
             this.quality = Qualities.Unknown.value
-            this.headers = ua + mapOf("Referer" to mainUrl)
+            this.headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer" to mainUrl,
+                "Origin" to mainUrl
+            )
         })
         return true
     }
