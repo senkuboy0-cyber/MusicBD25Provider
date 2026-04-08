@@ -64,28 +64,52 @@ class MusicBD25Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (data.isBlank() || !data.startsWith("http")) return false
+
         val doc = app.get(data, headers = ua).document
+
+        // filedownload link বের করো — href="//domain/filedownload/..."
         val rawHref = doc.select("a[href*='filedownload']")
             .firstOrNull()?.attr("href")?.trim() ?: return false
-        val downloadUrl = when {
+
+        val step1Url = when {
             rawHref.startsWith("http") -> rawHref
             rawHref.startsWith("//")   -> "https:$rawHref"
             rawHref.startsWith("/")    -> "$mainUrl$rawHref"
             else -> return false
         }
+
+        // Step 1 redirect → CDN URL (location header)
+        val step2Url = try {
+            val r1 = app.get(
+                step1Url,
+                headers = ua + mapOf("Referer" to mainUrl),
+                allowRedirects = false
+            )
+            r1.headers["location"]?.trim()?.ifBlank { null } ?: step1Url
+        } catch (e: Exception) { step1Url }
+
+        // Step 2 redirect → final mp4 URL (location header)
         val finalUrl = try {
-            app.get(downloadUrl, headers = ua + mapOf("Referer" to mainUrl), allowRedirects = true).url
-        } catch (e: Exception) { downloadUrl }
+            val r2 = app.get(
+                step2Url,
+                headers = ua + mapOf("Referer" to mainUrl),
+                allowRedirects = false
+            )
+            r2.headers["location"]?.trim()?.ifBlank { null } ?: step2Url
+        } catch (e: Exception) { step2Url }
+
         if (!finalUrl.startsWith("http")) return false
+
         val quality = when {
             finalUrl.contains("1080") -> Qualities.P1080.value
             finalUrl.contains("720")  -> Qualities.P720.value
             finalUrl.contains("480")  -> Qualities.P480.value
             else                      -> Qualities.Unknown.value
         }
+
         callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
             this.quality = quality
-            this.headers = ua + mapOf("Referer" to mainUrl)
+            this.headers = ua + mapOf("Referer" to step2Url)
         })
         return true
     }
