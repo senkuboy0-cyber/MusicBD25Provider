@@ -53,17 +53,7 @@ class MusicBD25Provider : MainAPI() {
             ?.let { if (it.startsWith("http")) it else null }
             ?: doc.selectFirst("img[src*='blogger.googleusercontent']")?.attr("src")
             ?: doc.selectFirst("meta[property=og:image]")?.attr("content")
-        val rawHref = doc.select("a[href*='filedownload'], source[src*='filedownload']")
-            .firstOrNull()?.let {
-                it.attr("href").ifBlank { it.attr("src") }
-            }?.trim() ?: ""
-        val videoUrl = when {
-            rawHref.startsWith("http") -> rawHref
-            rawHref.startsWith("//")   -> "https:$rawHref"
-            rawHref.startsWith("/")    -> "$mainUrl$rawHref"
-            else -> ""
-        }
-        return newMovieLoadResponse(title, url, TvType.Others, videoUrl) {
+        return newMovieLoadResponse(title, url, TvType.Others, url) {
             this.posterUrl = poster
         }
     }
@@ -75,21 +65,24 @@ class MusicBD25Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (data.isBlank() || !data.startsWith("http")) return false
-        var finalUrl = data
-        repeat(3) {
-            try {
-                val resp = app.get(
-                    finalUrl,
-                    headers = ua + mapOf("Referer" to mainUrl),
-                    allowRedirects = false
-                )
-                val location = resp.headers["location"]?.trim()
-                if (!location.isNullOrBlank() && location.startsWith("http")) {
-                    finalUrl = location
-                }
-            } catch (e: Exception) { }
+        val doc = app.get(data, headers = ua).document
+        val rawHref = doc.select("a[href*='filedownload'], source[src*='filedownload']")
+            .firstOrNull()?.let {
+                it.attr("href").ifBlank { it.attr("src") }
+            }?.trim() ?: return false
+        val downloadUrl = when {
+            rawHref.startsWith("http") -> rawHref
+            rawHref.startsWith("//")   -> "https:$rawHref"
+            rawHref.startsWith("/")    -> "$mainUrl$rawHref"
+            else -> return false
         }
-        if (!finalUrl.startsWith("http")) return false
+        // allowRedirects=true দিয়ে final URL নাও
+        val finalUrl = app.get(
+            downloadUrl,
+            headers = ua + mapOf("Referer" to mainUrl),
+            allowRedirects = true
+        ).url
+        if (!finalUrl.startsWith("http") || finalUrl.contains("musicbd25")) return false
         callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
             this.quality = Qualities.Unknown.value
             this.headers = ua + mapOf("Referer" to mainUrl)
