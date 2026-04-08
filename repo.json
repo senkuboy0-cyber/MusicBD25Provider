@@ -1,0 +1,8 @@
+{
+  "name": "MusicBD25 Provider",
+  "description": "MusicBD25 - Viral Video Site (Bengali/World Trending)",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/senkuboy0-cyber/MusicBD25Provider/builds/plugins.json"
+  ]
+}

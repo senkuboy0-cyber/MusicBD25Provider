@@ -1,0 +1,14 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/senkuboy0-cyber/MusicBD25Provider/builds/MusicBD25Provider.cs3",
+    "internalName": "MusicBD25Provider",
+    "tvTypes": ["Others"],
+    "language": "bn",
+    "name": "MusicBD25",
+    "authors": ["senkuboy0-cyber"],
+    "version": 1,
+    "description": "MusicBD25 - Bangla Music & Video",
+    "repositoryUrl": "https://github.com/senkuboy0-cyber/MusicBD25Provider",
+    "status": 1
+  }
+]
