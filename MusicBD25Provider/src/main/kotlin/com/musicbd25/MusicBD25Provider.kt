@@ -66,23 +66,28 @@ class MusicBD25Provider : MainAPI() {
     ): Boolean {
         if (data.isBlank() || !data.startsWith("http")) return false
         val doc = app.get(data, headers = ua).document
+
         val rawHref = doc.select("a[href*='filedownload'], source[src*='filedownload']")
             .firstOrNull()?.let {
                 it.attr("href").ifBlank { it.attr("src") }
             }?.trim() ?: return false
+
         val downloadUrl = when {
             rawHref.startsWith("http") -> rawHref
             rawHref.startsWith("//")   -> "https:$rawHref"
             rawHref.startsWith("/")    -> "$mainUrl$rawHref"
             else -> return false
         }
-        // allowRedirects=true দিয়ে final URL নাও
+
+        // Final URL বের করো — যেকোনো domain হোক
         val finalUrl = app.get(
             downloadUrl,
             headers = ua + mapOf("Referer" to mainUrl),
             allowRedirects = true
         ).url
-        if (!finalUrl.startsWith("http") || finalUrl.contains("musicbd25")) return false
+
+        if (!finalUrl.startsWith("http")) return false
+
         callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
             this.quality = Qualities.Unknown.value
             this.headers = ua + mapOf("Referer" to mainUrl)
