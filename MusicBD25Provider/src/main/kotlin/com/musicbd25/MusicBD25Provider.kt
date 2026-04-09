@@ -21,27 +21,19 @@ class MusicBD25Provider : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = request.data + page
         val doc = app.get(url, headers = ua).document
-
         val items = doc.select("a[href*='/page-download/']").mapNotNull { el ->
             val rawHref = el.attr("href").trim().ifBlank { return@mapNotNull null }
             val href = if (rawHref.startsWith("http")) rawHref else "$mainUrl$rawHref"
-
             val title = el.text().trim()
                 .replace(Regex("^world trending video[^:]*:\\s*", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("\\(\\s*\\d+\\s*hours? ago\\s*\\)", RegexOption.IGNORE_CASE), "")
                 .trim().ifBlank { return@mapNotNull null }
-
-            // Thumbnail: class="thumb" এর img tag থেকে
             val poster = el.selectFirst("div.thumb img, .thumb img")
                 ?.attr("src")?.trim()
                 ?.let { if (it.startsWith("http")) it else null }
                 ?: el.selectFirst("img[src*='blogger.googleusercontent']")?.attr("src")
-
-            newMovieSearchResponse(title, href, TvType.Others) {
-                posterUrl = poster
-            }
+            newMovieSearchResponse(title, href, TvType.Others) { posterUrl = poster }
         }.distinctBy { it.url }
-
         return newHomePageResponse(request.name, items, hasNext = true)
     }
 
@@ -62,14 +54,14 @@ class MusicBD25Provider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = ua).document
 
-        // Title from <title> tag
         val rawTitle = doc.selectFirst("title")?.text()?.trim() ?: ""
         val title = rawTitle
-            .replace("Download", "").replace(":: Best Download Wap Portal", "")
+            .replace("Download", "")
+            .replace(":: Best Download Wap Portal", "")
             .replace(".mp4", "").replace(".MP4", "")
-            .trim().ifBlank { url.substringAfterLast("/").replace(".html","").replace("-"," ") }
+            .trim()
+            .ifBlank { url.substringAfterLast("/").replace(".html","").replace("-"," ") }
 
-        // Thumbnail
         val poster = doc.selectFirst("div.thumb img, .thumb img")
             ?.attr("src")?.trim()
             ?.let { if (it.startsWith("http")) it else null }
@@ -82,6 +74,7 @@ class MusicBD25Provider : MainAPI() {
             ?.attr("href")?.trim()
             ?: ""
 
+        // // দিয়ে শুরু হলে https: যোগ করো
         val fileUrl = when {
             rawSrc.startsWith("http") -> rawSrc
             rawSrc.startsWith("//")   -> "https:$rawSrc"
@@ -102,18 +95,13 @@ class MusicBD25Provider : MainAPI() {
     ): Boolean {
         if (data.isBlank() || !data.startsWith("http")) return false
 
-        // filedownload → redirect → dl8...com final URL
-        val finalUrl = app.get(
-            data,
-            headers = ua + mapOf("Referer" to mainUrl),
-            allowRedirects = true
-        ).url
-
-        if (!finalUrl.startsWith("http")) return false
-
-        callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
+        // সরাসরি filedownload URL দাও — ExoPlayer নিজেই redirect follow করবে
+        callback(newExtractorLink(name, name, data, ExtractorLinkType.VIDEO) {
             this.quality = Qualities.Unknown.value
-            this.headers = ua + mapOf("Referer" to mainUrl)
+            this.headers = ua + mapOf(
+                "Referer" to mainUrl,
+                "Origin" to mainUrl
+            )
         })
         return true
     }
