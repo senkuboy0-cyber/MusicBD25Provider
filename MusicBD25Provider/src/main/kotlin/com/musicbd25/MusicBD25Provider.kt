@@ -53,7 +53,6 @@ class MusicBD25Provider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = ua).document
-
         val rawTitle = doc.selectFirst("title")?.text()?.trim() ?: ""
         val title = rawTitle
             .replace("Download", "")
@@ -61,27 +60,21 @@ class MusicBD25Provider : MainAPI() {
             .replace(".mp4", "").replace(".MP4", "")
             .trim()
             .ifBlank { url.substringAfterLast("/").replace(".html","").replace("-"," ") }
-
         val poster = doc.selectFirst("div.thumb img, .thumb img")
             ?.attr("src")?.trim()
             ?.let { if (it.startsWith("http")) it else null }
             ?: doc.selectFirst("img[src*='blogger.googleusercontent']")?.attr("src")
-
-        // filedownload URL বের করো
         val rawSrc = doc.selectFirst("source[src*='filedownload']")
             ?.attr("src")?.trim()
             ?: doc.selectFirst("a[href*='filedownload']")
             ?.attr("href")?.trim()
             ?: ""
-
-        // // দিয়ে শুরু হলে https: যোগ করো
         val fileUrl = when {
             rawSrc.startsWith("http") -> rawSrc
             rawSrc.startsWith("//")   -> "https:$rawSrc"
             rawSrc.startsWith("/")    -> "$mainUrl$rawSrc"
             else -> ""
         }
-
         return newMovieLoadResponse(title, url, TvType.Others, fileUrl) {
             this.posterUrl = poster
         }
@@ -94,13 +87,17 @@ class MusicBD25Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (data.isBlank() || !data.startsWith("http")) return false
-
-        // সরাসরি filedownload URL দাও — ExoPlayer নিজেই redirect follow করবে
-        callback(newExtractorLink(name, name, data, ExtractorLinkType.VIDEO) {
+        val finalUrl = app.get(
+            data,
+            headers = ua + mapOf("Referer" to mainUrl),
+            allowRedirects = true
+        ).url
+        if (!finalUrl.startsWith("http")) return false
+        callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
             this.quality = Qualities.Unknown.value
-            this.headers = ua + mapOf(
-                "Referer" to mainUrl,
-                "Origin" to mainUrl
+            this.headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer" to mainUrl
             )
         })
         return true
