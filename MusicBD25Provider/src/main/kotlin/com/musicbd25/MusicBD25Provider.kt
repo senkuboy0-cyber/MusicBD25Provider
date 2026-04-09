@@ -21,15 +21,27 @@ class MusicBD25Provider : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = request.data + page
         val doc = app.get(url, headers = ua).document
+
         val items = doc.select("a[href*='/page-download/']").mapNotNull { el ->
             val rawHref = el.attr("href").trim().ifBlank { return@mapNotNull null }
             val href = if (rawHref.startsWith("http")) rawHref else "$mainUrl$rawHref"
-            val title = el.text().trim().ifBlank { return@mapNotNull null }
-            val poster = el.selectFirst("div.thumb img, .thumb img, img")?.let {
-                it.attr("src").ifBlank { it.attr("data-src") }
-            }?.let { if (it.startsWith("http")) it else null }
-            newMovieSearchResponse(title, href, TvType.Others) { posterUrl = poster }
+
+            val title = el.text().trim()
+                .replace(Regex("^world trending video[^:]*:\\s*", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\(\\s*\\d+\\s*hours? ago\\s*\\)", RegexOption.IGNORE_CASE), "")
+                .trim().ifBlank { return@mapNotNull null }
+
+            // Thumbnail: class="thumb" এর img tag থেকে
+            val poster = el.selectFirst("div.thumb img, .thumb img")
+                ?.attr("src")?.trim()
+                ?.let { if (it.startsWith("http")) it else null }
+                ?: el.selectFirst("img[src*='blogger.googleusercontent']")?.attr("src")
+
+            newMovieSearchResponse(title, href, TvType.Others) {
+                posterUrl = poster
+            }
         }.distinctBy { it.url }
+
         return newHomePageResponse(request.name, items, hasNext = true)
     }
 
@@ -40,35 +52,44 @@ class MusicBD25Provider : MainAPI() {
             val rawHref = el.attr("href").trim().ifBlank { return@mapNotNull null }
             val href = if (rawHref.startsWith("http")) rawHref else "$mainUrl$rawHref"
             val title = el.text().trim().ifBlank { return@mapNotNull null }
-            newMovieSearchResponse(title, href, TvType.Others)
+            val poster = el.selectFirst("div.thumb img, .thumb img")
+                ?.attr("src")?.trim()
+                ?.let { if (it.startsWith("http")) it else null }
+            newMovieSearchResponse(title, href, TvType.Others) { posterUrl = poster }
         }.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = ua).document
-        val title = doc.selectFirst("h1, h2")?.text()?.trim()
-            ?: url.substringAfterLast("/").replace(".html","").replace("-"," ").trim()
+
+        // Title from <title> tag
+        val rawTitle = doc.selectFirst("title")?.text()?.trim() ?: ""
+        val title = rawTitle
+            .replace("Download", "").replace(":: Best Download Wap Portal", "")
+            .replace(".mp4", "").replace(".MP4", "")
+            .trim().ifBlank { url.substringAfterLast("/").replace(".html","").replace("-"," ") }
+
+        // Thumbnail
         val poster = doc.selectFirst("div.thumb img, .thumb img")
             ?.attr("src")?.trim()
             ?.let { if (it.startsWith("http")) it else null }
             ?: doc.selectFirst("img[src*='blogger.googleusercontent']")?.attr("src")
-            ?: doc.selectFirst("meta[property=og:image]")?.attr("content")
 
-        // filedownload URL বের করো — এটাই direct MP4
+        // filedownload URL বের করো
         val rawSrc = doc.selectFirst("source[src*='filedownload']")
             ?.attr("src")?.trim()
             ?: doc.selectFirst("a[href*='filedownload']")
             ?.attr("href")?.trim()
             ?: ""
 
-        val videoUrl = when {
+        val fileUrl = when {
             rawSrc.startsWith("http") -> rawSrc
             rawSrc.startsWith("//")   -> "https:$rawSrc"
             rawSrc.startsWith("/")    -> "$mainUrl$rawSrc"
             else -> ""
         }
 
-        return newMovieLoadResponse(title, url, TvType.Others, videoUrl) {
+        return newMovieLoadResponse(title, url, TvType.Others, fileUrl) {
             this.posterUrl = poster
         }
     }
@@ -80,13 +101,19 @@ class MusicBD25Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (data.isBlank() || !data.startsWith("http")) return false
-        callback(newExtractorLink(name, name, data, ExtractorLinkType.VIDEO) {
+
+        // filedownload → redirect → dl8...com final URL
+        val finalUrl = app.get(
+            data,
+            headers = ua + mapOf("Referer" to mainUrl),
+            allowRedirects = true
+        ).url
+
+        if (!finalUrl.startsWith("http")) return false
+
+        callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
             this.quality = Qualities.Unknown.value
-            this.headers = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer" to mainUrl,
-                "Origin" to mainUrl
-            )
+            this.headers = ua + mapOf("Referer" to mainUrl)
         })
         return true
     }
