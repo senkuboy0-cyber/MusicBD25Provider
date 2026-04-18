@@ -86,16 +86,14 @@ class MusicBD25Provider : MainAPI() {
             rawSrc.startsWith("/") -> "$mainUrl$rawSrc"
             else -> return false
         }
-        val finalUrl = app.get(
-            fileUrl,
-            headers = ua + mapOf("Referer" to data),
-            allowRedirects = true
-        ).url
-        val playUrl = if (finalUrl.startsWith("http") && finalUrl != fileUrl) finalUrl else fileUrl
-        callback(newExtractorLink(name, name, playUrl, ExtractorLinkType.VIDEO) {
-            this.quality = Qualities.Unknown.value
-            this.referer = fileUrl
-        })
+        callback(newExtractorLink(name, name, fileUrl, ExtractorLinkType.VIDEO) {
+    this.quality = Qualities.Unknown.value
+    this.referer = data
+    this.headers = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer" to data
+    )
+})
         return true
     }
 }
