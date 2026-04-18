@@ -64,18 +64,7 @@ class MusicBD25Provider : MainAPI() {
             ?.attr("src")?.trim()
             ?.let { if (it.startsWith("http")) it else null }
             ?: doc.selectFirst("img[src*='blogger.googleusercontent']")?.attr("src")
-        val rawSrc = doc.selectFirst("source[src*='filedownload']")
-            ?.attr("src")?.trim()
-            ?: doc.selectFirst("a[href*='filedownload']")
-            ?.attr("href")?.trim()
-            ?: ""
-        val fileUrl = when {
-            rawSrc.startsWith("http") -> rawSrc
-            rawSrc.startsWith("//")   -> "https:$rawSrc"
-            rawSrc.startsWith("/")    -> "$mainUrl$rawSrc"
-            else -> ""
-        }
-        return newMovieLoadResponse(title, url, TvType.Others, fileUrl) {
+        return newMovieLoadResponse(title, url, TvType.Others, url) {
             this.posterUrl = poster
         }
     }
@@ -86,19 +75,26 @@ class MusicBD25Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        if (data.isBlank() || !data.startsWith("http")) return false
+        if (data.isBlank()) return false
+        val doc = app.get(data, headers = ua).document
+        val rawSrc = doc.selectFirst("source[src*='filedownload']")?.attr("src")?.trim()
+            ?: doc.selectFirst("a[href*='filedownload']")?.attr("href")?.trim()
+            ?: return false
+        val fileUrl = when {
+            rawSrc.startsWith("http") -> rawSrc
+            rawSrc.startsWith("//") -> "https:$rawSrc"
+            rawSrc.startsWith("/") -> "$mainUrl$rawSrc"
+            else -> return false
+        }
         val finalUrl = app.get(
-            data,
-            headers = ua + mapOf("Referer" to mainUrl),
+            fileUrl,
+            headers = ua + mapOf("Referer" to data),
             allowRedirects = true
         ).url
-        if (!finalUrl.startsWith("http")) return false
-        callback(newExtractorLink(name, name, finalUrl, ExtractorLinkType.VIDEO) {
+        val playUrl = if (finalUrl.startsWith("http") && finalUrl != fileUrl) finalUrl else fileUrl
+        callback(newExtractorLink(name, name, playUrl, ExtractorLinkType.VIDEO) {
             this.quality = Qualities.Unknown.value
-            this.headers = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer" to mainUrl
-            )
+            this.referer = fileUrl
         })
         return true
     }
